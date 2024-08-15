@@ -1,0 +1,174 @@
+#!/bin/bash
+
+# Function to display the current date and time
+display_current_date_time() {
+    echo "$(date)"
+}
+
+# Variables
+openrcfile=$1
+tag=$2
+ssh_key=$3
+required_dev_servers=$(cat servers.conf)
+
+def_network="${tag}_network"
+def_subnet="${tag}_subnet"
+def_keypair="${tag}_key"
+def_router="${tag}_router"
+def_security_grp="${tag}_security_group"
+haproxyserv="${tag}_HAproxy"
+haproxyserv2="${tag}_HAproxy2"
+bastionserv="${tag}_bastion"
+devlop_serv="${tag}_dev"
+virtualip="${tag}_vip"
+sshconf_file="config"
+knownhosts="known_hosts"
+hostsfile="hosts"
+floating_ip2=$(cat floatipadd2)
+
+# Function to clean up servers
+clean_up_servers() {
+  devserv=($(openstack server list --name "$tag" -c ID -f value))
+  n=${#devserv[@]}
+
+  if [[ $n -gt 0 ]]; then
+    echo "$(date) $n servers found. Deleting servers..."
+
+    for no_serv in "${devserv[@]}"; do
+      openstack server delete "$no_serv"
+    done
+
+    echo "$(date) Servers deleted."
+  else
+    echo "$(date) No servers found to delete."
+  fi
+}
+
+# Function to clean up keypairs
+clean_up_keypairs() {
+  key=($(openstack keypair list -f value -c Name | grep "$tag"))
+
+  if [[ ${#key[@]} -gt 0 ]]; then
+    for pair in "${key[@]}"; do
+      openstack keypair delete "$pair"
+    done
+
+    echo "$(date) Keypairs deleted."
+  else
+    echo "$(date) No keypairs found to delete."
+  fi
+}
+
+# Function to clean up floating IPs
+clean_up_floatips() {
+  floatadd=($(openstack floating ip list --status DOWN -f value -c "Floating IP Address"))
+
+  if [[ ${#floatadd[@]} -gt 0 ]]; then
+    for add_float in "${floatadd[@]}"; do
+      openstack floating ip delete "$add_float"
+    done
+
+    echo "$(date) Floating IPs deleted."
+  else
+    echo "$(date) No floating IPs found to delete."
+  fi
+}
+
+# Function to clean up virtual ports
+clean_up_viprt() {
+  openstack floating ip unset --port "$floating_ip2"
+  echo "$(date) Disconnected floating IP from virtual port."
+
+  vfip=$(openstack port show "$virtualip" -f value -c fixed_ips | grep -Po '\d+\.\d+\.\d+\.\d+')
+  echo "$vfip" >> vadd
+
+  floatips_notassign=($(openstack floating ip list --port "$virtualip" --status ACTIVE -f value -c "Floating IP Address"))
+
+  for ipadd in "${floatips_notassign[@]}"; do
+    openstack floating ip unset --port "$ipadd"
+    echo "$(date) Unset floating IP $ipadd from port."
+  done
+
+  openstack port delete "$virtualip"
+  echo "$(date) Virtual port deleted."
+}
+
+# Function to clean up subnets
+clean_up_subnets() {
+  snets=($(openstack subnet list --tag "$tag" -c ID -f value))
+
+  if [[ ${#snets[@]} -gt 0 ]]; then
+    for subnet in "${snets[@]}"; do
+      openstack router remove subnet "$def_router" "$subnet"
+      openstack subnet delete "$subnet"
+    done
+
+    echo "$(date) Subnets deleted."
+  else
+    echo "$(date) No subnets found to delete."
+  fi
+}
+
+# Function to clean up routers
+clean_up_routers() {
+  list_routers=($(openstack router list --tag "$tag" -f value -c Name))
+
+  if [[ ${#list_routers[@]} -gt 0 ]]; then
+    for router in "${list_routers[@]}"; do
+      openstack router delete "$router"
+    done
+
+    echo "$(date) Routers deleted."
+  else
+    echo "$(date) No routers found to delete."
+  fi
+}
+
+# Function to clean up networks
+clean_up_networks() {
+  list_network=($(openstack network list --tag "$tag" -f value -c Name))
+
+  if [[ ${#list_network[@]} -gt 0 ]]; then
+    for networks in "${list_network[@]}"; do
+      openstack network delete "$networks"
+    done
+
+    echo "$(date) Networks deleted."
+  else
+    echo "$(date) No networks found to delete."
+  fi
+}
+
+# Function to clean up security groups
+clean_up_securitygrps() {
+  list_sectygrp=($(openstack security group list --tag "$tag" -f value -c Name))
+
+  if [[ ${#list_sectygrp[@]} -gt 0 ]]; then
+    for security in "${list_sectygrp[@]}"; do
+      openstack security group delete "$security"
+    done
+
+    echo "$(date) Security groups deleted."
+  else
+    echo "$(date) No security groups found to delete."
+  fi
+}
+
+# Main script execution
+display_current_date_time
+echo "Starting cleaning of $tag using $openrcfile for credentials."
+source "$openrcfile"
+
+# Call the cleanup functions
+clean_up_servers
+clean_up_keypairs
+clean_up_viprt
+clean_up_floatips
+clean_up_subnets
+clean_up_routers
+clean_up_networks
+clean_up_securitygrps
+
+# Remove unnecessary files
+rm -f "$sshconf_file" "$knownhosts" "floatipadd1" "floatipadd2" "$hostsfile" "addr_vip" "vadd"
+
